@@ -99,7 +99,6 @@ export class LensProxy {
       const cluster = this.clusterManager.getClusterForRequest(req)
       const contextHandler = cluster.contextHandler
       const nodeParam = this.getNodeParam(req.url)
-
       contextHandler.withTemporaryKubeconfig((kubeconfigPath) => {
         return new Promise<boolean>(async (resolve, reject) => {
           const shellSession = await shell.open(con, kubeconfigPath, cluster, nodeParam)

@@ -10,6 +10,15 @@
                 <b-form-group
                   label="Choose config:"
                 >
+                  <b-form-file
+                    v-model="file"
+                    :state="Boolean(file)"
+                    placeholder="Choose a file or drop it here..."
+                    drop-placeholder="Drop file here..."
+                    @input="reloadKubeContexts()"
+                  ></b-form-file>
+                  <div class="mt-3">Selected file: {{ file ? file.name : '' }}</div>
+
                   <b-form-select
                     v-model="kubecontext"
                     :options="contextNames"
@@ -113,6 +122,9 @@ import * as k8s from "@kubernetes/client-node"
 import { dumpConfigYaml } from "../../main/k8s"
 import ClustersMixin from "@/mixins/ClustersMixin";
 import * as path from "path"
+import fs from 'fs'
+import { v4 as uuidv4 } from 'uuid';
+import * as clusterStore from "../../common/cluster-store"
 
 class ClusterAccessError extends Error {}
 
@@ -125,6 +137,8 @@ export default {
   },
   data(){
     return {
+      file: null,
+      filepath: null,
       clusterconfig: "",
       httpsProxy: "",
       kubecontext: "",
@@ -136,7 +150,10 @@ export default {
     }
   },
   mounted: function() {
-    this.$store.dispatch("reloadAvailableKubeContexts");
+    const kubeConfigPath = path.join(process.env.HOME, '.kube', 'config')
+    this.filepath = kubeConfigPath
+    this.file = new File(fs.readFileSync(this.filepath), this.filepath)
+    this.$store.dispatch("reloadAvailableKubeContexts", this.filepath);
     this.seenContexts = JSON.parse(JSON.stringify(this.$store.getters.seenContexts)) // clone seenContexts from store
     this.storeSeenContexts()
   },
@@ -163,6 +180,10 @@ export default {
     },
   },
   methods: {
+    reloadKubeContexts() {
+      this.filepath = this.file.path
+      this.$store.dispatch("reloadAvailableKubeContexts", this.file.path);
+    },
     isNewContext(context) {
       return this.newContexts.indexOf(context) > -1
     },
@@ -196,12 +217,15 @@ export default {
       try {
         const kc = new k8s.KubeConfig();
         kc.loadFromString(this.clusterconfig); // throws TypeError if we cannot parse kubeconfig
-
-        // TODO Remove hardcoded path
-        const configPath = path.join(process.env.HOME, '.kube', 'config');
-
+        const clusterId = uuidv4();
+        // We need to store the kubeconfig to "app-home"/
+        if (this.kubecontext === "custom") {
+          // TODO Call "writeEmbeddedKubeConfig"
+          this.filepath = clusterStore.writeEmbeddedKubeConfig(clusterId, this.clusterconfig)
+        }
         const clusterInfo = {
-          kubeConfigPath: configPath,
+          id: clusterId,
+          kubeConfigPath: this.filepath,
           contextName: kc.currentContext,
           preferences: {
             clusterName: kc.currentContext
@@ -211,6 +235,7 @@ export default {
         if (this.httpsProxy) {
           clusterInfo.preferences.httpsProxy = this.httpsProxy
         }
+        console.log("sending clusterInfo:", clusterInfo)
         let res = await this.$store.dispatch('addCluster', clusterInfo)
         console.log("addCluster result:", res)
         if(!res){
